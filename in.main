@@ -1,0 +1,203 @@
+# Input file for creating an Fe/Al interface
+#  ** Z-direction Al(001)/Fe(001) plane stacking
+#  ** X-direction Al[100]/Fe[110] this produces the best lattice matching since
+#     Fe spacing along [110] is equal to a*sqrt(2) = 4.0538
+#  in order to stack different crystallographic planes, the box spacing needs
+#  to be correctly modified
+
+#  Modified after strategy change 14/10/2016
+
+units       metal
+dimension   3
+boundary    p      p     f  #layers are stacked along z
+atom_style  atomic          #no need for charges or bonds
+
+#------------ Constant parameters -----------------------------
+variable   latparamAl  equal  4.050  #obtained from library.meam
+variable   latparamFe  equal  2.866
+
+#------------ Variable parameters -----------------------------
+variable    nzAl  equal  11 #number of Al layers in z-direction
+variable    nzFe  equal  11 #number of Fe layers in z-direction
+variable    fzAl  equal  8 #Fraction of Al layers in z-direction
+variable    fzFe  equal  8 #Fraction of Fe layers in z-direction
+variable    nxAl  equal  15
+variable    nxFe  equal  ${nxAl}
+variable    nvac  equal  4 #number of vacuum layers
+
+variable    T       equal  300 #Kelvins - temperature for equilibration of the system
+variable    Th      equal  850 #Kelvins - temperature for defected interface
+variable    tanneal equal  100 # ps - total quenching time
+variable    tequilb equal  250 # ps - total equilibration time
+#------------ Create the box ----------------------------------
+
+
+#      0                             ${tmp3} 
+#      --------------------------------->     
+#      ##################################  ${tmp2}         
+#      ############# nvac   #############     |
+#      ##################################     |
+#      ----------------------------------  ${tmp5}                
+#                      Fe               %     |
+#                                       |     | 
+#                                      nzFe   |
+#                                       |   ${tmp7}
+#                                       %     |
+#      ----------------------------------     0
+#                                       |     |
+#                      Al              nzAl ${tmp6}
+#                                       |     |
+#                                       |     |
+#      ----------------------------------     |
+#      ##################################  ${tmp4}
+#      ############# nvac   #############     |
+#      ##################################  ${tmp1}
+#                                             \/
+
+#FCC and BCC lattices are oriented in the most packed planes direction
+                                            
+lattice     fcc ${latparamAl} &
+            orient x 1 0 0 orient y 0 1 0 orient z 0 0 1
+
+#variable    H_total  equal  (2*${nvac}+${nzAl})*${latparamAl}+${nzFe}*${latparamFe} #total height
+variable    tmp1     equal  -(${nvac}+${nzAl})*${latparamAl}
+variable    tmp2     equal  ${nzFe}*${latparamFe}+${nvac}*${latparamAl}
+variable    tmp3     equal  ${nxAl}*${latparamAl}
+
+region      fullbox block   0 ${tmp3} 0 ${tmp3} ${tmp1} ${tmp2} units box
+create_box  2       fullbox
+
+#------------ Create the Al layer -----------------------------
+variable      tmp3s  equal ${tmp3}-0.1 # Angstroms; to avoid setting atoms on the periodic boundaries
+variable      tmp4   equal -${nzAl}*${latparamAl}
+region        rg_Al  block  0 ${tmp3s} 0 ${tmp3s} ${tmp4} -0.1 units box
+
+create_atoms  1 region rg_Al
+
+#------------ Create the Fe layer -----------------------------
+variable      tmp5   equal ${nzFe}*${latparamFe}-0.1 # Angstroms; avoid hitting periodic boundary in z
+region        rg_Fe  block 0 ${tmp3s} 0 ${tmp3s} 0 ${tmp5} units box
+lattice       bcc ${latparamFe} &
+  orient x 1 1 0 orient y -1 1 0 orient z 0 0 1 &
+  origin 0.25 0 0 
+
+create_atoms  2 region rg_Fe
+
+#----------------------------Define potential-------------------
+mass 1 26.98
+mass 2 55.845
+
+pair_style meam
+pair_coeff * * library.meam Al Fe AlSiMgCuFe.meam Al Fe
+write_dump    all custom snap0.lmp id type x y z
+
+
+#------------ Define interface, Al, Fe regions ---------------
+
+variable      tmp6   equal ${tmp4}+${fzAl}*${latparamAl}
+variable      tmp7   equal ${tmp5}-${fzFe}*${latparamFe}
+
+region        btm_Al  block INF INF INF INF ${tmp4} ${tmp6} units box
+region        top_Fe  block INF INF INF INF ${tmp7} ${tmp5} units box
+region        rg_inter  block 0 INF 0 INF ${tmp6} ${tmp7} units box
+
+region        rg_innerAl block EDGE EDGE EDGE EDGE ${tmp6} 0       units box #region to calc density
+region        rg_innerFe block EDGE EDGE EDGE EDGE 0       ${tmp7} units box #region to calc density
+
+group Al type 1
+group Fe type 2
+
+group Felayers  region top_Fe
+group Allayers  region btm_Al
+group Interface region rg_inter
+
+#---------- Minmize forces --------------------------------
+compute       mype all pe
+variable      peatom equal c_mype/count(all)  #PE per atom
+
+thermo        100
+thermo_style  custom step v_peatom press lx ly lz
+#dump	      mydump1 all image 10000 dump.minimal_confProject.*.jpeg type type view 90 0
+
+minimize      1e-20 1e-25 50000 1000000
+write_dump    all custom snap_miniz.lmp id type x y z
+#undump	      mydump1
+
+#---------- Create Disordered Interface -----------------------
+velocity      all set 0.0 0.0 0.0
+velocity      Interface create ${Th} 12547 dist gaussian mom yes
+compute       temp_inter Interface temp  
+
+fix           1 Interface nvt temp ${Th} $T 0.2  # "quench" the interface
+
+timestep      0.005 		#5 fs timestep
+variable      nanneal equal ${tanneal}/dt
+
+dump          disorder all custom 200 dump.disorder.dat id type x y z
+#dump 	      mydump2 all image 10000 dump.disordered_conf.*.jpeg type type view 90 0 size 1024 768
+
+thermo        100
+thermo_style  custom step c_temp_inter temp press lx ly lz v_peatom
+
+run           ${nanneal}
+unfix         1
+undump        disorder
+#undump	      mydump2
+
+#---------- Equilibration -----------------------------------
+timestep      0.002 #2 fs timestep
+variable      T2 equal 2*$T
+velocity      all create ${T2} 12214  mom yes dist gaussian sum no # gaussian distribution
+fix           3 all npt temp $T $T 0.2 x 0.0 0.0 1.0 y 0.0 0.0 1.0 #relax system in XY plane 
+
+dump          eq      all custom 200  dump.equilib.dat id type x y z
+#dump 	      mydump4 all image 10000 dump.equilibrium_conf.*.jpeg type type view 90 0 size 1024 768
+
+thermo        100
+thermo_style  custom step temp press lx ly lz v_peatom
+variable      nequilb equal ${tequilb}/dt
+
+run           ${nequilb}  #100 ps
+unfix         3
+undump        eq
+#undump	      mydump4
+
+write_restart equilib.restart
+quit
+#--------------- Loading -----------------------------------
+
+label loading
+
+#reset_timestep 0
+
+#fix integ all npt temp $T $T 0.2 x 0.0 0.0 1.0 y 0.0 0.0 1.0 
+#fix compressdown Felayers aveforce NULL NULL -0.01
+#fix compressup Allayers aveforce NULL NULL 0.01
+
+#compute stpa all stress/atom NULL
+#compute stgb all reduce sum c_stpa[1] c_stpa[2] c_stpa[3]
+
+#thermo 100
+#thermo_style custom step temp etotal pe press pxx pyy pzz vol lz zlo zhi c_stgb[1] c_stgb[2] c_stgb[3]
+
+#dump mydump3 all custom 500 dump.loading.1.* id type x y z c_stpa[1] c_stpa[2] c_stpa[3]
+#write_dump all custom loading.*.lmp id type x y z
+
+#dump mydump4 all image 10000 dump.compress.*.jpeg type type view 90 0
+
+#fix 2 Fe ave/spatial 100 1 100 z lower 6 density/mass norm all units box file Femassdensity.profile
+
+#fix 3 Al ave/spatial 100 1 100 z lower 6 density/mass norm all units box file Almassdensity.profile
+
+#fix 4 Fe ave/spatial 100 1 100 z lower 6 density/number norm all units box file Fenumberdensity.profile
+
+#fix 5 Al ave/spatial 100 1 100 z lower 6 density/number norm all units box file Alnumberdensity.profile
+
+#compute myRDF all rdf 1000 1 1 2 2 1 2 2 1
+
+#fix 6 all ave/time 100 1 100 c_myRDF file all.rdf mode vector
+
+#run 200000 #equivalent of 1ns
+
+#undump	 mydump3 
+#undump 	 mydump4 
