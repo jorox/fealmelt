@@ -4,8 +4,7 @@
 #     Fe spacing along [110] is equal to a*sqrt(2) = 4.0538
 #  in order to stack different crystallographic planes, the box spacing needs to be correctly modified
 
-#  Taken from equilibrium after disorder has been added to the interface 
-# Change aveforce in loading to addforce after atoms lost 27/10/2016
+#  Taken from equilibrium after disorder has been added to the interface 18/10/2016
 
 #----------------- Read Restart file -------------------------
 
@@ -28,8 +27,8 @@ variable    nzAl  equal  11 #number of Al layers in z-direction
 variable    nzFe  equal  11 #number of Fe layers in z-direction
 variable    fzAl  equal  8  #Fraction of Al layers in z-direction
 variable    fzFe  equal  8  #Fraction of Fe layers in z-direction
-variable    flzAl equal  3  #Fraction of Al to apply load to
-variable    flzFe equal  3  #Fraction of Fe to apply load to
+variable    flzAl equal  1.2  #Fraction of Al to apply load to
+variable    flzFe equal  1.2  #Fraction of Fe to apply load to
 variable    nxAl  equal  15
 variable    nxFe  equal  ${nxAl}
 variable    nvac  equal  4 #number of vacuum layers
@@ -41,13 +40,10 @@ variable    tequilb equal  250 # ps - total equilibration time
 
 variable    tmp1     equal  -(${nvac}+${nzAl})*${latparamAl}
 variable    tmp2     equal  ${nzFe}*${latparamFe}+${nvac}*${latparamAl}
-variable  	   tmp3   equal  ${nxAl}*${latparamAl}
+variable    tmp3     equal  ${nxAl}*${latparamAl}
 variable      tmp3s  equal ${tmp3}-0.1
 variable      tmp4   equal -${nzAl}*${latparamAl}
 variable      tmp5   equal ${nzFe}*${latparamFe}-0.1
-
-#variable pos_slowF equal atan(step/1000)*2/PI*0.01
-#variable neg_slowF equal -v_pos_slowF
 
 #------------ Define interface, Al, Fe regions ---------------
 
@@ -76,45 +72,58 @@ group Alloadinglayers region btm_Al
 label loading
 
 reset_timestep 0
+#variable  v_indent   equal 5 #nm/ps
+#variable  k_indent   equal 400 #MPa =10e6 J/m3
 
-fix integ all npt temp $T $T 0.2 x 0.0 0.0 1.0 y 0.0 0.0 1.0 
+#variable  dz_indent  equal elapsed*dt*${v_indent}*10
+#variable  zhi_indent equal zhi-v_dz_indent
+#variable  zlo_indent equal zlo+v_dz_indent
+#variable  k          equal ${k_indent}*1e6/1.602*1e-11
+
+#fix       ind_top    Fe indent $k plane z v_zhi_indent hi units box
+#fix       ind_bot    Al indent $k plane z v_zlo_indent lo units box
+
+fix integ all npt temp $T $T 0.2 x 0.0 0.0 1.0 y 0.0 0.0 1.0
+#velocity Feloadinglayers zero linear
+#velocity Alloadinglayers zero linear
+
 fix compressdown Feloadinglayers addforce 0.0 0.0 -0.01
-fix compressup Alloadinglayers addforce 0.0 0.0 0.01
+fix compressup  Alloadinglayers addforce  0.0 0.0 0.01
 
-compute stpa all stress/atom NULL
-compute stgb all reduce sum c_stpa[1] c_stpa[2] c_stpa[3]
+#compute stpa all stress/atom NULL
+#compute stgb all reduce sum c_stpa[1] c_stpa[2] c_stpa[3]
 
 thermo 100
-thermo_style custom step temp etotal pe press pxx pyy pzz vol lz zlo zhi c_stgb[1] c_stgb[2] c_stgb[3]
+thermo_style custom step temp etotal pe press pxx pyy pzz  #c_stgb[1] c_stgb[2] c_stgb[3]
 
-dump load all custom 500 dump.load.dat id type x y z
+dump load all custom 100 dump.load.dat id type x y z
 
-dump mydump4 all custom 25000 loading.1.*.dump id type x y z c_stpa[1] c_stpa[2] c_stpa[3]
-write_dump all custom loading.*.lmp id type x y z
+#dump mydump4 all custom 10000 dump.loading.1.* id type x y z c_stpa[1] c_stpa[2] c_stpa[3]
+#write_dump all custom loading.*.lmp id type x y z
 
-dump mydump5 all image 10000 dump.compress.*.jpeg type type view 90 0
+#dump mydump5 all image 10000 dump.compress.*.jpeg type type view 90 0
 
-fix 4 Fe ave/spatial 100 1 100 z lower 6 density/mass norm all units box file Femassdensity.profile
+#fix 4 Fe ave/spatial 100 1 100 z lower 6 density/mass norm all units box file Femassdensity.profile
 
-fix 5 Al ave/spatial 100 1 100 z lower 6 density/mass norm all units box file Almassdensity.profile
+#fix 5 Al ave/spatial 100 1 100 z lower 6 density/mass norm all units box file Almassdensity.profile
 
-fix 6 Fe ave/spatial 100 1 100 z lower 6 density/number norm all units box file Fenumberdensity.profile
+#fix 6 Fe ave/spatial 100 1 100 z lower 6 density/number norm all units box file Fenumberdensity.profile
 
-fix 7 Al ave/spatial 100 1 100 z lower 6 density/number norm all units box file Alnumberdensity.profile
+#fix 7 Al ave/spatial 100 1 100 z lower 6 density/number norm all units box file Alnumberdensity.profile
 
-compute myRDF Interface rdf 1000 1 1 2 2 1 2 2 1
+#compute myRDF Interface rdf 1000 1 1 2 2 1 2 2 1
 
-fix 8 all ave/time 100 1 100 c_myRDF file all.rdf mode vector
+#fix 8 all ave/time 100 1 100 c_myRDF file all.rdf mode vector
 
 run 200000 #equivalent of 1ns
 
 undump 	 load
-undump	 mydump4
-undump 	 mydump5
-unfix 	 4 
-unfix 	 5
-unfix 	 6
-unfix 	 7
-unfix 	 8
+#undump	 mydump4
+#undump 	 mydump5
+#unfix 	 4 
+#unfix 	 5
+#unfix 	 6
+#unfix 	 7
+#unfix 	 8
 
-write_restart Load.restart
+#write_restart Load.restart
