@@ -21,14 +21,11 @@ variable    nzAl  equal  11 #number of Al layers in z-direction
 variable    nzFe  equal  11 #number of Fe layers in z-direction
 variable    fzAl  equal  8 #Fraction of Al layers in z-direction
 variable    fzFe  equal  8 #Fraction of Fe layers in z-direction
-variable    nxAl  equal  15
+variable    nxAl  equal  15 # number of unit cells in the x and y directions
 variable    nxFe  equal  ${nxAl}
 variable    nvac  equal  4 #number of vacuum layers
 
 variable    T       equal  300 #Kelvins - temperature for equilibration of the system
-variable    Th      equal  850 #Kelvins - temperature for defected interface
-variable    tanneal equal  100 # ps - total quenching time
-variable    tequilb equal  250 # ps - total equilibration time
 #------------ Create the box ----------------------------------
 
 
@@ -39,7 +36,7 @@ variable    tequilb equal  250 # ps - total equilibration time
 #      ##################################     |
 #      ----------------------------------  ${tmp5}                
 #                      Fe               %     |
-#                                       |     | 
+#                                       |     | fzFe
 #                                      nzFe   |
 #                                       |   ${tmp7}
 #                                       %     |
@@ -47,7 +44,7 @@ variable    tequilb equal  250 # ps - total equilibration time
 #                                       |     |
 #                      Al              nzAl ${tmp6}
 #                                       |     |
-#                                       |     |
+#                                       |     | fzAl
 #      ----------------------------------     |
 #      ##################################  ${tmp4}
 #      ############# nvac   #############     |
@@ -75,6 +72,8 @@ region        rg_Al  block  0 ${tmp3s} 0 ${tmp3s} ${tmp4} -0.1 units box
 create_atoms  1 region rg_Al
 
 #------------ Create the Fe layer -----------------------------
+# The Fe layer is rotated by 45 degrees along the Z-axis and shifted by 0.25 along the X-axis
+# to allow for periodic conditions in the XY plane
 variable      tmp5   equal ${nzFe}*${latparamFe}-0.1 # Angstroms; avoid hitting periodic boundary in z
 region        rg_Fe  block 0 ${tmp3s} 0 ${tmp3s} 0 ${tmp5} units box
 lattice       bcc ${latparamFe} &
@@ -107,8 +106,8 @@ region        rg_innerFe block EDGE EDGE EDGE EDGE 0       ${tmp7} units box #re
 group Al type 1
 group Fe type 2
 
-group Felayers  region top_Fe
-group Allayers  region btm_Al
+group Felayers  region top_Fe  # non-interface Fe
+group Allayers  region btm_Al  # non_interface Al
 group Interface region rg_inter
 
 #---------- Minmize forces --------------------------------
@@ -117,50 +116,30 @@ variable      peatom equal c_mype/count(all)  #PE per atom
 
 thermo        100
 thermo_style  custom step v_peatom press lx ly lz
-#dump	      mydump1 all image 10000 dump.minimal_confProject.*.jpeg type type view 90 0
 
 minimize      1e-20 1e-25 50000 1000000
-write_dump    all custom snap_miniz.lmp id type x y z
-#undump	      mydump1
-
-#---------- Create Disordered Interface -----------------------
-velocity      all set 0.0 0.0 0.0
-velocity      Interface create ${Th} 12547 dist gaussian mom yes
-compute       temp_inter Interface temp  
-
-fix           1 Interface nvt temp ${Th} $T 0.2  # "quench" the interface
-
-timestep      0.005 		#5 fs timestep
-variable      nanneal equal ${tanneal}/dt
-
-dump          disorder all custom 200 dump.disorder.dat id type x y z
-#dump 	      mydump2 all image 10000 dump.disordered_conf.*.jpeg type type view 90 0 size 1024 768
-
-thermo        100
-thermo_style  custom step c_temp_inter temp press lx ly lz v_peatom
-
-run           ${nanneal}
-unfix         1
-undump        disorder
-#undump	      mydump2
+write_dump    all custom dumps/snap_miniz.lmp id type x y z
 
 #---------- Equilibration -----------------------------------
-timestep      0.002 #2 fs timestep
-variable      T2 equal 2*$T
-velocity      all create ${T2} 12214  mom yes dist gaussian sum no # gaussian distribution
-fix           3 all npt temp $T $T 0.2 x 0.0 0.0 1.0 y 0.0 0.0 1.0 #relax system in XY plane 
 
-dump          eq      all custom 200  dump.equilib.dat id type x y z
-#dump 	      mydump4 all image 10000 dump.equilibrium_conf.*.jpeg type type view 90 0 size 1024 768
+timestep      0.005 #2 fs timestep
+variable      T2 equal 2*$T 
+variable      runtime equal 500 #ps
+variable      nequilib equal ${runtime}/dt
+variable      dumptime equal 0.01 #ps
+variable      ndump equal ${dumptime}/dt
+
+velocity      all create ${T2} 12214  mom yes dist gaussian sum no # gaussian distribution
+fix           1 all npt temp $T $T 0.2 x 0.0 0.0 1.0 y 0.0 0.0 1.0 #relax system in XY plane 
+
+dump          eq      all custom ${ndump}  dumps/dump.equilib.dat.* id type x y z
 
 thermo        100
 thermo_style  custom step temp press lx ly lz v_peatom
-variable      nequilb equal ${tequilb}/dt
 
-run           ${nequilb}  #100 ps
-unfix         3
+run           ${nequilib}  #100 ps
+unfix         1
 undump        eq
-#undump	      mydump4
 
 write_restart equilib.restart
 quit
